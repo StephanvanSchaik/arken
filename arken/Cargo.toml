@@ -18,6 +18,9 @@ tempfile.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, optional = true }
 
+[dev-dependencies]
+clap = { version = "4", features = ["derive"] }
+
 [features]
 default = ["jiff", "rust_decimal", "uuid"]
 jiff = ["dep:jiff"]

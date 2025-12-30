@@ -1,6 +1,6 @@
 use crate::{Config, Error, Field};
-use bytes::BytesMut;
 use ::jiff::Timestamp;
+use bytes::BytesMut;
 
 impl<'a> Field<'a> for ::jiff::Timestamp {
     fn from_slice(mut slice: &'a [u8], config: Config) -> Result<(Self, &'a [u8]), Error> {
