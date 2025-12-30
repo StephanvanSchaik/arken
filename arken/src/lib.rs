@@ -20,7 +20,7 @@ use thiserror::Error;
 
 #[cfg(feature = "rust_decimal")]
 pub use crate::decimal::FixedDecimal;
-pub use crate::migrate::{MigrationStrategy, migrate};
+pub use crate::migrate::{MigrationStrategy, migrate, migrate_to};
 pub use crate::reader::Reader;
 pub use crate::writer::Writer;
 pub use arken_impl::Arken;
