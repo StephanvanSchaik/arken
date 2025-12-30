@@ -1,0 +1,23 @@
+[package]
+name = "arken"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+arken-impl.path = "../arken-impl"
+bytes.workspace = true
+crc32fast.workspace = true
+integer-encoding.workspace = true
+mmap-rs.workspace = true
+memchr.workspace = true
+num_enum.workspace = true
+pastey.workspace = true
+rust_decimal = { workspace = true, optional = true }
+tempfile.workspace = true
+thiserror.workspace = true
+uuid = { workspace = true, optional = true }
+
+[features]
+default = ["rust_decimal", "uuid"]
+rust_decimal = ["dep:rust_decimal"]
+uuid = ["dep:uuid"]

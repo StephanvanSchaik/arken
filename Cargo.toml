@@ -1,0 +1,21 @@
+[workspace]
+resolver = "1"
+members = ["arken", "arken-impl"]
+
+[workspace.dependencies]
+aho-corasick = "1"
+bytes = "1"
+crc32fast = "1"
+darling = "0.23"
+integer-encoding = "4"
+memchr = "2"
+mmap-rs = "0.7"
+num_enum = "0.7"
+pastey = "0.2"
+proc-macro2 = "1"
+quote = "1"
+rust_decimal = { version = "1", features = ["macros"] }
+syn = { version = "2", features = ["extra-traits"] }
+tempfile = "3"
+thiserror = "2"
+uuid = "1"
