@@ -55,7 +55,12 @@ impl ToTokens for Opts {
             let mut migrate_tokens = Vec::with_capacity(data.fields.len());
 
             for field in &data.fields {
-                let Field { ident, ty, endian, size } = field;
+                let Field {
+                    ident,
+                    ty,
+                    endian,
+                    size,
+                } = field;
 
                 field_tokens.push(quote! {
                     #ident,
@@ -178,7 +183,12 @@ impl ToTokens for Opts {
                 let mut migrate_subtokens = Vec::with_capacity(variant.fields.len());
 
                 for (index, field) in variant.fields.as_ref().iter().enumerate() {
-                    let Field { ident, ty, endian, size } = field;
+                    let Field {
+                        ident,
+                        ty,
+                        endian,
+                        size,
+                    } = field;
                     let ident = ident.clone().unwrap_or(format_ident!("v{index}"));
 
                     names.push(quote! {
@@ -193,8 +203,12 @@ impl ToTokens for Opts {
 
                     let endian = match endian {
                         Some(Endian::Big) => quote! { config.with_endian(arken::Endian::Big); },
-                        Some(Endian::Little) => quote! { config.with_endian(arken::Endian::Little); },
-                        Some(Endian::Native) => quote! { config.with_endian(arken::Endian::Native); },
+                        Some(Endian::Little) => {
+                            quote! { config.with_endian(arken::Endian::Little); }
+                        }
+                        Some(Endian::Native) => {
+                            quote! { config.with_endian(arken::Endian::Native); }
+                        }
                         None => quote! {},
                     };
 
