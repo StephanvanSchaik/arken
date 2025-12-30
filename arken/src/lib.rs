@@ -1,6 +1,8 @@
 #[cfg(feature = "rust_decimal")]
 mod decimal;
 mod float;
+#[cfg(feature = "jiff")]
+mod jiff;
 mod migrate;
 mod reader;
 mod signed;
@@ -35,6 +37,9 @@ pub enum Error {
     Overflow,
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[cfg(feature = "jiff")]
+    #[error(transparent)]
+    Jiff(#[from] ::jiff::Error),
     #[error(transparent)]
     Mmap(#[from] mmap_rs::Error),
     #[error(transparent)]
