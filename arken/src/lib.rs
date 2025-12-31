@@ -202,25 +202,6 @@ impl<'a> Field<'a> for Cow<'a, str> {
     }
 }
 
-impl<'a> Field<'a> for Cow<'a, [u8]> {
-    fn from_slice(mut slice: &'a [u8], config: Config) -> Result<(Self, &'a [u8]), Error> {
-        let (n, rest) = usize::from_slice(slice, config)?;
-        slice = rest;
-
-        let value = &slice[..n];
-        slice = &slice[n..];
-
-        Ok((value.into(), slice))
-    }
-
-    fn put_bytes(&self, bytes: &mut BytesMut, config: Config) -> Result<(), Error> {
-        self.len().put_bytes(bytes, config)?;
-        bytes.put_slice(&self[..]);
-
-        Ok(())
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum Array<'a, T> {
     Ref(&'a [u8]),
@@ -328,6 +309,96 @@ impl<'a, T: Field<'a>> Field<'a> for Ref<'a, T> {
         let reference = writer.append(bytes, &value)?;
 
         self.offset = reference.offset;
+
+        Ok(())
+    }
+}
+
+impl<'a, T: Clone + Field<'a>, const N: usize> Field<'a> for Cow<'a, [T; N]> {
+    fn from_slice(mut slice: &'a [u8], config: Config) -> Result<(Self, &'a [u8]), Error> {
+        let values = std::array::from_fn(|_| {
+            let (value, rest) = T::from_slice(slice, config).unwrap();
+            slice = rest;
+            value
+        });
+
+        Ok((Cow::Owned(values), slice))
+    }
+
+    fn put_bytes(&self, bytes: &mut BytesMut, config: Config) -> Result<(), Error> {
+        for value in self.as_ref() {
+            value.put_bytes(bytes, config)?;
+        }
+
+        Ok(())
+    }
+
+    fn migrate<W: Seek + Write>(
+        &mut self,
+        bytes: &mut BytesMut,
+        writer: &mut Writer<W>,
+        reader: &Reader<'a>,
+    ) -> Result<(), Error> {
+        match self {
+            Cow::Borrowed(values) => {
+                let mut values = values.clone();
+
+                for value in &mut values {
+                    value.migrate(bytes, writer, reader)?;
+                }
+
+                *self = Cow::Owned(values);
+            }
+            Cow::Owned(values) => {
+                for value in values {
+                    value.migrate(bytes, writer, reader)?;
+                }
+            }
+        };
+
+        Ok(())
+    }
+}
+
+impl<'a, T: Clone + Field<'a>> Field<'a> for Cow<'a, [T]> {
+    fn from_slice(mut slice: &'a [u8], config: Config) -> Result<(Self, &'a [u8]), Error> {
+        let (n, rest) = usize::from_slice(slice, config)?;
+        slice = rest;
+
+        let mut values = Vec::with_capacity(n);
+
+        for _ in 0..n {
+            let (value, rest) = T::from_slice(slice, config).unwrap();
+            slice = rest;
+            values.push(value);
+        }
+
+        Ok((Cow::Owned(values), slice))
+    }
+
+    fn put_bytes(&self, bytes: &mut BytesMut, config: Config) -> Result<(), Error> {
+        self.as_ref().len().put_bytes(bytes, config)?;
+
+        for value in self.as_ref() {
+            value.put_bytes(bytes, config)?;
+        }
+
+        Ok(())
+    }
+
+    fn migrate<W: Seek + Write>(
+        &mut self,
+        bytes: &mut BytesMut,
+        writer: &mut Writer<W>,
+        reader: &Reader<'a>,
+    ) -> Result<(), Error> {
+        let mut values = std::mem::take(self).into_owned();
+
+        for value in &mut values {
+            value.migrate(bytes, writer, reader)?;
+        }
+
+        *self = Cow::Owned(values);
 
         Ok(())
     }
