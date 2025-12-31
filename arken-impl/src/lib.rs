@@ -56,7 +56,8 @@ impl ToTokens for Opts {
         }
 
         let lifetime = generics.lifetimes().next().expect("lifetime is missing");
-        let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
+        let (impl_generics, _, _) = generics.split_for_impl();
+        let (_, ty_generics, where_clause) = self.generics.split_for_impl();
 
         if let Some(data) = self.data.as_ref().take_struct() {
             let mut field_tokens = Vec::with_capacity(data.fields.len());
