@@ -1,7 +1,8 @@
 use darling::{FromDeriveInput, FromField, FromMeta, FromVariant};
 use proc_macro::TokenStream;
+use proc_macro2::Span;
 use quote::{ToTokens, format_ident, quote};
-use syn::{DeriveInput, Generics, Ident, Type, parse_macro_input};
+use syn::{DeriveInput, Generics, GenericParam, Ident, Lifetime, LifetimeParam, Type, parse_macro_input};
 
 #[derive(Clone, Copy, Debug, FromMeta)]
 enum Endian {
@@ -45,8 +46,17 @@ struct Opts {
 impl ToTokens for Opts {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let name = &self.ident;
-        let lifetime = self.generics.lifetimes().next();
-        let (impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
+
+        let mut generics = self.generics.clone();
+
+        if generics.lifetimes().next().is_none() {
+            let lifetime = Lifetime::new("'a", Span::call_site());
+            let param = LifetimeParam::new(lifetime);
+            generics.params.push(GenericParam::from(param));
+        }
+
+        let lifetime = generics.lifetimes().next().expect("lifetime is missing");
+        let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
         if let Some(data) = self.data.as_ref().take_struct() {
             let mut field_tokens = Vec::with_capacity(data.fields.len());
@@ -104,71 +114,37 @@ impl ToTokens for Opts {
                 });
             }
 
-            if let Some(lifetime) = lifetime {
-                tokens.extend(quote! {
-                    impl #impl_generics arken::Field<#lifetime> for #name #ty_generics #where_clause {
-                        fn from_slice(mut slice: &#lifetime [u8], config: arken::Config) -> Result<(Self, &#lifetime [u8]), arken::Error> {
+            tokens.extend(quote! {
+                impl #impl_generics arken::Field<#lifetime> for #name #ty_generics #where_clause {
+                    fn from_slice(mut slice: &#lifetime [u8], config: arken::Config) -> Result<(Self, &#lifetime [u8]), arken::Error> {
+                        #(
+                            #decoder_tokens
+                        )*
+
+                        Ok((Self {
                             #(
-                                #decoder_tokens
+                                #field_tokens
                             )*
-
-                            Ok((Self {
-                                #(
-                                    #field_tokens
-                                )*
-                            }, slice))
-                        }
-
-                        fn put_bytes(&self, bytes: &mut bytes::BytesMut, config: arken::Config) -> Result<(), arken::Error> {
-                            #(
-                                #encoder_tokens
-                            )*
-
-                            Ok(())
-                        }
-
-                        fn migrate<W: std::io::Seek + std::io::Write>(&mut self, bytes: &mut bytes::BytesMut, writer: &mut arken::Writer<W>, reader: &arken::Reader<'a>) -> Result<(), arken::Error> {
-                            #(
-                                #migrate_tokens
-                            )*
-
-                            Ok(())
-                        }
+                        }, slice))
                     }
-                });
-            } else {
-                tokens.extend(quote! {
-                    impl<'a> #impl_generics arken::Field<'a> for #name #ty_generics #where_clause {
-                        fn from_slice(mut slice: &'a [u8], config: arken::Config) -> Result<(Self, &'a [u8]), arken::Error> {
-                            #(
-                                #decoder_tokens
-                            )*
 
-                            Ok((Self {
-                                #(
-                                    #field_tokens
-                                )*
-                            }, slice))
-                        }
+                    fn put_bytes(&self, bytes: &mut bytes::BytesMut, config: arken::Config) -> Result<(), arken::Error> {
+                        #(
+                            #encoder_tokens
+                        )*
 
-                        fn put_bytes(&self, bytes: &mut bytes::BytesMut, config: arken::Config) -> Result<(), arken::Error> {
-                            #(
-                                #encoder_tokens
-                            )*
-
-                            Ok(())
-                        }
-
-                        fn migrate<W: std::io::Seek + std::io::Write>(&mut self, bytes: &mut bytes::BytesMut, writer: &mut arken::Writer<W>, reader: &arken::Reader<'a>) -> Result<(), arken::Error> {
-                            #(
-                                #migrate_tokens
-                            )*
-
-                            Ok(())
-                        }
+                        Ok(())
                     }
-                });
-            }
+
+                    fn migrate<W: std::io::Seek + std::io::Write>(&mut self, bytes: &mut bytes::BytesMut, writer: &mut arken::Writer<W>, reader: &arken::Reader<'a>) -> Result<(), arken::Error> {
+                        #(
+                            #migrate_tokens
+                        )*
+
+                        Ok(())
+                    }
+                }
+            });
         } else if let Some(variants) = self.data.as_ref().take_enum() {
             let mut decoder_tokens = Vec::with_capacity(variants.len());
             let mut encoder_tokens = Vec::with_capacity(variants.len());
@@ -282,83 +258,43 @@ impl ToTokens for Opts {
                 });
             }
 
-            if let Some(lifetime) = lifetime {
-                tokens.extend(quote! {
-                    impl #impl_generics arken::Field<#lifetime> for #name #ty_generics #where_clause {
-                        fn from_slice(mut slice: &#lifetime [u8], config: arken::Config) -> Result<(Self, &#lifetime [u8]), arken::Error> {
-                            let (tag, rest) = usize::from_slice(slice, config)?;
-                            slice = rest;
+            tokens.extend(quote! {
+                impl #impl_generics arken::Field<#lifetime> for #name #ty_generics #where_clause {
+                    fn from_slice(mut slice: &#lifetime [u8], config: arken::Config) -> Result<(Self, &#lifetime [u8]), arken::Error> {
+                        let (tag, rest) = usize::from_slice(slice, config)?;
+                        slice = rest;
 
-                            let value = match tag {
-                                #(
-                                    #decoder_tokens
-                                )*
-                                _ => return Err(Error::Incomplete),
-                            };
+                        let value = match tag {
+                            #(
+                                #decoder_tokens
+                            )*
+                            _ => return Err(Error::Incomplete),
+                        };
 
-                            Ok((value, slice))
-                        }
-
-                        fn put_bytes(&self, bytes: &mut bytes::BytesMut, config: arken::Config) -> Result<(), arken::Error> {
-                            match self {
-                                #(
-                                    #encoder_tokens
-                                )*
-                            }
-
-                            Ok(())
-                        }
-
-                        fn migrate<W: std::io::Seek + std::io::Write>(&mut self, bytes: &mut bytes::BytesMut, writer: &mut arken::Writer<W>, reader: &arken::Reader<'a>) -> Result<(), arken::Error> {
-                            match self {
-                                #(
-                                    #migrate_tokens
-                                )*
-                            }
-
-                            Ok(())
-                        }
+                        Ok((value, slice))
                     }
-                });
-            } else {
-                tokens.extend(quote! {
-                    impl<'a> #impl_generics arken::Field<'a> for #name #ty_generics #where_clause {
-                        fn from_slice(mut slice: &'a [u8], config: arken::Config) -> Result<(Self, &'a [u8]), arken::Error> {
-                            let (tag, rest) = usize::from_slice(slice, config)?;
-                            slice = rest;
 
-                            let value = match tag {
-                                #(
-                                    #decoder_tokens
-                                )*
-                                _ => return Err(Error::Incomplete),
-                            };
-
-                            Ok((value, slice))
+                    fn put_bytes(&self, bytes: &mut bytes::BytesMut, config: arken::Config) -> Result<(), arken::Error> {
+                        match self {
+                            #(
+                                #encoder_tokens
+                            )*
                         }
 
-                        fn put_bytes(&self, bytes: &mut bytes::BytesMut, config: arken::Config) -> Result<(), arken::Error> {
-                            match self {
-                                #(
-                                    #encoder_tokens
-                                )*
-                            }
-
-                            Ok(())
-                        }
-
-                        fn migrate<W: std::io::Seek + std::io::Write>(&mut self, bytes: &mut bytes::BytesMut, writer: &mut arken::Writer<W>, reader: &arken::Reader<'a>) -> Result<(), arken::Error> {
-                            match self {
-                                #(
-                                    #migrate_tokens
-                                )*
-                            }
-
-                            Ok(())
-                        }
+                        Ok(())
                     }
-                });
-            }
+
+                    fn migrate<W: std::io::Seek + std::io::Write>(&mut self, bytes: &mut bytes::BytesMut, writer: &mut arken::Writer<W>, reader: &arken::Reader<'a>) -> Result<(), arken::Error> {
+                        match self {
+                            #(
+                                #migrate_tokens
+                            )*
+                        }
+
+                        Ok(())
+                    }
+                }
+            });
         } else {
             unreachable!()
         }
