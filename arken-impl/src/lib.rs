@@ -2,7 +2,7 @@ use darling::{FromDeriveInput, FromField, FromMeta, FromVariant};
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::{ToTokens, format_ident, quote};
-use syn::{DeriveInput, Generics, GenericParam, Ident, Lifetime, LifetimeParam, Type, parse_macro_input};
+use syn::{DeriveInput, Generics, GenericParam, Ident, Index, Lifetime, LifetimeParam, Type, parse_macro_input};
 
 #[derive(Clone, Copy, Debug, FromMeta)]
 enum Endian {
@@ -60,20 +60,28 @@ impl ToTokens for Opts {
         let (_, ty_generics, where_clause) = self.generics.split_for_impl();
 
         if let Some(data) = self.data.as_ref().take_struct() {
-            let mut field_tokens = Vec::with_capacity(data.fields.len());
+            let mut names = Vec::with_capacity(data.fields.len());
             let mut decoder_tokens = Vec::with_capacity(data.fields.len());
             let mut encoder_tokens = Vec::with_capacity(data.fields.len());
             let mut migrate_tokens = Vec::with_capacity(data.fields.len());
 
-            for field in &data.fields {
+            for (index, field) in data.fields.iter().enumerate() {
                 let Field {
                     ident,
                     ty,
                     endian,
                     size,
                 } = field;
+                let access = match ident {
+                    Some(ident) => quote! { self.#ident },
+                    _ => {
+                        let index = Index::from(index);
+                        quote! { self.#index }
+                    }
+                };
+                let ident = ident.clone().unwrap_or(format_ident!("v{index}"));
 
-                field_tokens.push(quote! {
+                names.push(quote! {
                     #ident,
                 });
 
@@ -106,14 +114,30 @@ impl ToTokens for Opts {
                         let mut config = config;
                         #size
                         #endian
-                        self.#ident.put_bytes(bytes, config)?;
+                        #access.put_bytes(bytes, config)?;
                     }
                 });
 
                 migrate_tokens.push(quote! {
-                    self.#ident.migrate(bytes, writer, reader)?;
+                    #access.migrate(bytes, writer, reader)?;
                 });
             }
+
+            let fields = if data.is_struct() {
+                quote! { {
+                    #(
+                        #names
+                    )*
+                } }
+            } else if data.is_tuple() {
+                quote! { (
+                    #(
+                        #names
+                    )*
+                ) }
+            } else {
+                quote! {}
+            };
 
             tokens.extend(quote! {
                 impl #impl_generics arken::Field<#lifetime> for #name #ty_generics #where_clause {
@@ -122,11 +146,7 @@ impl ToTokens for Opts {
                             #decoder_tokens
                         )*
 
-                        Ok((Self {
-                            #(
-                                #field_tokens
-                            )*
-                        }, slice))
+                        Ok((Self #fields, slice))
                     }
 
                     fn put_bytes(&self, bytes: &mut bytes::BytesMut, config: arken::Config) -> Result<(), arken::Error> {
