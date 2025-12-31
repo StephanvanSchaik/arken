@@ -1,6 +1,7 @@
 use crate::{Config, Error, Field, Ref};
 use memchr::memmem::FinderRev;
-use std::marker::PhantomData;
+use mmap_rs::{Mmap, MmapOptions};
+use std::{fs::File, marker::PhantomData, path::Path};
 
 #[derive(Clone, Debug)]
 pub struct MarkerIter<'a, T: Field<'a>> {
@@ -68,5 +69,44 @@ impl<'a> Reader<'a> {
             limit: usize::MAX,
             _marker: PhantomData,
         }
+    }
+}
+
+fn round_up(x: usize, align: usize) -> usize {
+    (x + align.saturating_sub(1)) & !(align.saturating_sub(1))
+}
+
+#[derive(Debug)]
+pub struct MappedFile {
+    map: Option<Mmap>,
+    size: usize,
+}
+
+impl MappedFile {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        let file = File::open(&path)?;
+
+        let size = file.metadata()?.len() as usize;
+        let map_size = round_up(size, MmapOptions::page_size());
+
+        if map_size == 0 {
+            return Ok(Self { map: None, size });
+        }
+
+        let map = unsafe { MmapOptions::new(map_size)?.with_file(&file, 0).map()? };
+
+        Ok(Self {
+            map: Some(map),
+            size,
+        })
+    }
+
+    pub fn reader(&self) -> Result<Reader<'_>, Error> {
+        Reader::try_from(
+            self.map
+                .as_ref()
+                .map(|map| &map[..self.size])
+                .unwrap_or(&[]),
+        )
     }
 }

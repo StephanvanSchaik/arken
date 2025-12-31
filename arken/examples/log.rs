@@ -1,9 +1,8 @@
-use arken::{Arken, Error, Reader, Writer};
+use arken::{Arken, Error, MappedFile, Writer};
 use bytes::BytesMut;
 use clap::{Parser, Subcommand};
 use jiff::Timestamp;
-use mmap_rs::MmapOptions;
-use std::{borrow::Cow, fs::File};
+use std::borrow::Cow;
 
 #[derive(Arken, Clone, Debug)]
 struct Message<'a> {
@@ -25,27 +24,13 @@ struct Args {
     command: Command,
 }
 
-fn round_up(x: usize, align: usize) -> usize {
-    (x + align.saturating_sub(1)) & !(align.saturating_sub(1))
-}
-
 fn main() -> Result<(), Error> {
     let args = Args::parse();
 
     match &args.command {
         Command::List => {
-            let file = File::open("log.bin")?;
-
-            let size = file.metadata()?.len() as usize;
-            let size = round_up(size, MmapOptions::page_size());
-
-            if size == 0 {
-                return Ok(());
-            }
-
-            let map = unsafe { MmapOptions::new(size)?.with_file(&file, 0).map()? };
-
-            let reader = Reader::try_from(&map[..])?;
+            let file = MappedFile::open("log.bin")?;
+            let reader = file.reader()?;
 
             for (index, message) in reader.find::<Message>(b"msg").enumerate() {
                 if index != 0 {
