@@ -23,6 +23,8 @@ struct Field {
     ident: Option<Ident>,
     ty: Type,
     #[darling(default)]
+    skip: bool,
+    #[darling(default)]
     endian: Option<Endian>,
     #[darling(default)]
     size: Option<Size>,
@@ -69,6 +71,7 @@ impl ToTokens for Opts {
                 let Field {
                     ident,
                     ty,
+                    skip,
                     endian,
                     size,
                 } = field;
@@ -84,6 +87,14 @@ impl ToTokens for Opts {
                 names.push(quote! {
                     #ident,
                 });
+
+                if *skip {
+                    decoder_tokens.push(quote! {
+                        let #ident = Default::default();
+                    });
+
+                    continue;
+                }
 
                 let size = match size {
                     Some(Size::Fixed) => quote! { config.fixed_width(); },
@@ -183,6 +194,7 @@ impl ToTokens for Opts {
                     let Field {
                         ident,
                         ty,
+                        skip,
                         endian,
                         size,
                     } = field;
@@ -191,6 +203,14 @@ impl ToTokens for Opts {
                     names.push(quote! {
                         #ident,
                     });
+
+                    if *skip {
+                        decoder_tokens.push(quote! {
+                            let #ident = Default::default();
+                        });
+
+                        continue;
+                    }
 
                     let size = match size {
                         Some(Size::Fixed) => quote! { config.fixed_width(); },
