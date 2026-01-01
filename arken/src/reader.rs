@@ -38,7 +38,7 @@ impl<'a, T: Field<'a>> Iterator for MarkerIter<'a, T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Reader<'a> {
     bytes: &'a [u8],
     config: Config,
