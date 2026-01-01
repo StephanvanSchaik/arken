@@ -48,7 +48,7 @@ impl<'a> TryFrom<&'a [u8]> for Reader<'a> {
     type Error = Error;
 
     fn try_from(bytes: &'a [u8]) -> Result<Self, Error> {
-        let (config, _) = Config::from_slice(&bytes, Default::default())?;
+        let (config, _) = Config::from_slice(bytes, Default::default())?;
 
         Ok(Self { bytes, config })
     }

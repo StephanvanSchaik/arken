@@ -160,7 +160,7 @@ impl<'a, T: Field<'a>> Field<'a> for Option<T> {
 
                 Ok((Some(value), slice))
             }
-            _ => return Err(Error::Incomplete),
+            _ => Err(Error::Incomplete),
         }
     }
 
