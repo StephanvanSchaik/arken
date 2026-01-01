@@ -2,7 +2,10 @@ use darling::{FromDeriveInput, FromField, FromMeta, FromVariant};
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::{ToTokens, format_ident, quote};
-use syn::{DeriveInput, Generics, GenericParam, Ident, Index, Lifetime, LifetimeParam, Type, parse_macro_input};
+use syn::{
+    DeriveInput, Expr, GenericParam, Generics, Ident, Index, Lifetime, LifetimeParam, Type,
+    parse_macro_input,
+};
 
 #[derive(Clone, Copy, Debug, FromMeta)]
 enum Endian {
@@ -24,6 +27,8 @@ struct Field {
     ty: Type,
     #[darling(default)]
     skip: bool,
+    #[darling(default)]
+    skip_with: Option<Expr>,
     #[darling(default)]
     endian: Option<Endian>,
     #[darling(default)]
@@ -72,6 +77,7 @@ impl ToTokens for Opts {
                     ident,
                     ty,
                     skip,
+                    skip_with,
                     endian,
                     size,
                 } = field;
@@ -88,9 +94,17 @@ impl ToTokens for Opts {
                     #ident,
                 });
 
+                if let Some(skip_with) = skip_with {
+                    decoder_tokens.push(quote! {
+                        let #ident = #skip_with;
+                    });
+
+                    continue;
+                }
+
                 if *skip {
                     decoder_tokens.push(quote! {
-                        let #ident = Default::default();
+                        let #ident = Default::skip_with();
                     });
 
                     continue;
@@ -195,6 +209,7 @@ impl ToTokens for Opts {
                         ident,
                         ty,
                         skip,
+                        skip_with,
                         endian,
                         size,
                     } = field;
@@ -203,6 +218,14 @@ impl ToTokens for Opts {
                     names.push(quote! {
                         #ident,
                     });
+
+                    if let Some(skip_with) = skip_with {
+                        decoder_tokens.push(quote! {
+                            let #ident = #skip_with;
+                        });
+
+                        continue;
+                    }
 
                     if *skip {
                         decoder_tokens.push(quote! {
@@ -309,7 +332,7 @@ impl ToTokens for Opts {
                             #(
                                 #decoder_tokens
                             )*
-                            _ => return Err(Error::Incomplete),
+                            _ => return Err(arken::Error::Incomplete),
                         };
 
                         Ok((value, slice))
