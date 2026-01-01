@@ -82,35 +82,81 @@ fn round_up(x: usize, align: usize) -> usize {
 
 #[derive(Debug)]
 pub struct MappedFile {
+    file: Option<File>,
     map: Option<Mmap>,
     size: usize,
 }
 
 impl MappedFile {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
-        let file = File::open(&path)?;
+        let Ok(file) = File::open(&path) else {
+            return Ok(Self {
+                file: None,
+                map: None,
+                size: 0,
+            });
+        };
 
-        let size = file.metadata()?.len() as usize;
+        let size = file
+            .metadata()
+            .map(|metadata| metadata.len() as usize)
+            .unwrap_or(0);
+
         let map_size = round_up(size, MmapOptions::page_size());
 
         if map_size == 0 {
-            return Ok(Self { map: None, size });
+            return Ok(Self {
+                file: Some(file),
+                map: None,
+                size,
+            });
         }
 
         let map = unsafe { MmapOptions::new(map_size)?.with_file(&file, 0).map()? };
 
         Ok(Self {
+            file: Some(file),
             map: Some(map),
             size,
         })
     }
 
-    pub fn reader(&self) -> Result<Reader<'_>, Error> {
+    pub fn resize(&mut self) -> Result<(), Error> {
+        let Some(file) = self.file.as_ref() else {
+            return Ok(());
+        };
+
+        let size = file
+            .metadata()
+            .map(|metadata| metadata.len() as usize)
+            .unwrap_or(0);
+
+        if self.size == size {
+            return Ok(());
+        }
+
+        let map_size = round_up(size, MmapOptions::page_size());
+
+        if map_size == 0 {
+            self.map = None;
+            self.size = 0;
+        }
+
+        let map = unsafe { MmapOptions::new(map_size)?.with_file(&file, 0).map()? };
+
+        self.map = Some(map);
+        self.size = size;
+
+        Ok(())
+    }
+
+    pub fn reader(&self) -> Reader<'_> {
         Reader::try_from(
             self.map
                 .as_ref()
                 .map(|map| &map[..self.size])
                 .unwrap_or(&[]),
         )
+        .unwrap_or_default()
     }
 }

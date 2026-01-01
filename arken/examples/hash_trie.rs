@@ -1,4 +1,4 @@
-use arken::{Error, HashMap, HashRootRef, MappedFile, Reader, Writer};
+use arken::{Error, HashMap, HashRootRef, MappedFile, Writer};
 use bytes::BytesMut;
 use clap::{Parser, Subcommand};
 use std::borrow::Cow;
@@ -34,11 +34,8 @@ fn main() -> Result<(), Error> {
 
     match &args.command {
         Command::Count => {
-            let file = MappedFile::open("trie.bin").ok();
-            let reader = file
-                .as_ref()
-                .and_then(|file| file.reader().ok())
-                .unwrap_or(Reader::default());
+            let file = MappedFile::open("trie.bin")?;
+            let reader = file.reader();
             let root = reader
                 .find::<HashRootRef<'_, Cow<'_, str>, Cow<'_, str>>>(b"map")
                 .next();
@@ -47,11 +44,8 @@ fn main() -> Result<(), Error> {
             println!("count = {}", trie.len());
         }
         Command::Query { key } => {
-            let file = MappedFile::open("trie.bin").ok();
-            let reader = file
-                .as_ref()
-                .and_then(|file| file.reader().ok())
-                .unwrap_or(Reader::default());
+            let file = MappedFile::open("trie.bin")?;
+            let reader = file.reader();
             let root = reader
                 .find::<HashRootRef<'_, Cow<'_, str>, Cow<'_, str>>>(b"map")
                 .next();
@@ -63,11 +57,8 @@ fn main() -> Result<(), Error> {
             }
         }
         Command::Add { key, value } => {
-            let file = MappedFile::open("trie.bin").ok();
-            let reader = file
-                .as_ref()
-                .and_then(|file| file.reader().ok())
-                .unwrap_or(Reader::default());
+            let file = MappedFile::open("trie.bin")?;
+            let reader = file.reader();
             let root = reader
                 .find::<HashRootRef<'_, Cow<'_, str>, Cow<'_, str>>>(b"map")
                 .next();
@@ -81,11 +72,8 @@ fn main() -> Result<(), Error> {
             }
         }
         Command::Remove { key } => {
-            let file = MappedFile::open("trie.bin").ok();
-            let reader = file
-                .as_ref()
-                .and_then(|file| file.reader().ok())
-                .unwrap_or(Reader::default());
+            let file = MappedFile::open("trie.bin")?;
+            let reader = file.reader();
             let root = reader
                 .find::<HashRootRef<'_, Cow<'_, str>, Cow<'_, str>>>(b"map")
                 .next();

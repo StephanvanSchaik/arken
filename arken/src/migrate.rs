@@ -26,7 +26,7 @@ pub fn migrate_to<D: AsRef<Path>, P: AsRef<Path>, S: MigrationStrategy>(
     path: P,
 ) -> Result<(), Error> {
     let file = MappedFile::open(&path)?;
-    let reader = file.reader()?;
+    let reader = file.reader();
 
     let mut writer = Writer::tempfile(Default::default())?;
 
