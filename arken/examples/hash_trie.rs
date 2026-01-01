@@ -1,4 +1,4 @@
-use arken::{Error, HashMap, MappedFile, Reader, Writer};
+use arken::{Error, HashMap, HashRootRef, MappedFile, Reader, Writer};
 use bytes::BytesMut;
 use clap::{Parser, Subcommand};
 use std::borrow::Cow;
@@ -39,7 +39,10 @@ fn main() -> Result<(), Error> {
                 .as_ref()
                 .and_then(|file| file.reader().ok())
                 .unwrap_or(Reader::default());
-            let trie: HashMap<'_, Cow<'_, str>, Cow<'_, str>> = HashMap::open(reader, b"map");
+            let root = reader
+                .find::<HashRootRef<'_, Cow<'_, str>, Cow<'_, str>>>(b"map")
+                .next();
+            let trie: HashMap<'_, Cow<'_, str>, Cow<'_, str>> = HashMap::open(reader, root);
 
             println!("count = {}", trie.len());
         }
@@ -49,7 +52,10 @@ fn main() -> Result<(), Error> {
                 .as_ref()
                 .and_then(|file| file.reader().ok())
                 .unwrap_or(Reader::default());
-            let trie: HashMap<'_, Cow<'_, str>, Cow<'_, str>> = HashMap::open(reader, b"map");
+            let root = reader
+                .find::<HashRootRef<'_, Cow<'_, str>, Cow<'_, str>>>(b"map")
+                .next();
+            let trie: HashMap<'_, Cow<'_, str>, Cow<'_, str>> = HashMap::open(reader, root);
 
             match trie.get(&key.into()) {
                 Some(value) => println!("{key} = {value}"),
@@ -62,10 +68,17 @@ fn main() -> Result<(), Error> {
                 .as_ref()
                 .and_then(|file| file.reader().ok())
                 .unwrap_or(Reader::default());
-            let mut trie: HashMap<'_, Cow<'_, str>, Cow<'_, str>> = HashMap::open(reader, b"map");
+            let root = reader
+                .find::<HashRootRef<'_, Cow<'_, str>, Cow<'_, str>>>(b"map")
+                .next();
+            let mut trie: HashMap<'_, Cow<'_, str>, Cow<'_, str>> = HashMap::open(reader, root);
 
             trie.insert(key.into(), value.into());
-            trie.commit(&mut bytes, &mut writer)?;
+            let root_reference = trie.commit(&mut bytes, &mut writer)?;
+
+            if let Some(root_reference) = root_reference {
+                writer.append_with_marker(&mut bytes, b"map", &root_reference)?;
+            }
         }
         Command::Remove { key } => {
             let file = MappedFile::open("trie.bin").ok();
@@ -73,10 +86,17 @@ fn main() -> Result<(), Error> {
                 .as_ref()
                 .and_then(|file| file.reader().ok())
                 .unwrap_or(Reader::default());
-            let mut trie: HashMap<'_, Cow<'_, str>, Cow<'_, str>> = HashMap::open(reader, b"map");
+            let root = reader
+                .find::<HashRootRef<'_, Cow<'_, str>, Cow<'_, str>>>(b"map")
+                .next();
+            let mut trie: HashMap<'_, Cow<'_, str>, Cow<'_, str>> = HashMap::open(reader, root);
 
             trie.remove(&key.into());
-            trie.commit(&mut bytes, &mut writer)?;
+            let root_reference = trie.commit(&mut bytes, &mut writer)?;
+
+            if let Some(root_reference) = root_reference {
+                writer.append_with_marker(&mut bytes, b"map", &root_reference)?;
+            }
         }
     }
 

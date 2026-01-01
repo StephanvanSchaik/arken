@@ -56,6 +56,10 @@ impl<'a> TryFrom<&'a [u8]> for Reader<'a> {
 
 impl<'a> Reader<'a> {
     pub fn read<T: Field<'a>>(&self, reference: &Ref<'a, T>) -> Result<T, Error> {
+        if self.bytes.len() < reference.offset {
+            return Err(Error::InvalidOffset);
+        }
+
         let (value, _) = T::from_slice(&self.bytes[reference.offset..], self.config)?;
 
         Ok(value)

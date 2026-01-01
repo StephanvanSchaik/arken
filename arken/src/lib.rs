@@ -23,7 +23,7 @@ use thiserror::Error;
 
 #[cfg(feature = "rust_decimal")]
 pub use crate::decimal::FixedDecimal;
-pub use crate::hash_trie::{HashMap, HashSet};
+pub use crate::hash_trie::{HashMap, HashRootRef, HashSet};
 pub use crate::migrate::{MigrationStrategy, migrate, migrate_to};
 pub use crate::reader::{MappedFile, Reader};
 pub use crate::writer::Writer;
@@ -35,6 +35,8 @@ pub enum Error {
     Incomplete,
     #[error("invalid header")]
     InvalidHeader,
+    #[error("invalid offset")]
+    InvalidOffset,
     #[error("overflow")]
     Overflow,
     #[error(transparent)]

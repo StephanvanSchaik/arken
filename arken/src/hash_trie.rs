@@ -55,26 +55,32 @@ pub struct KeyValue<'a, K: Field<'a>, V: Field<'a>> {
     _value_lifetime: &'a PhantomData<V>,
 }
 
+pub type KeyValueRef<'a, K, V> = Ref<'a, KeyValue<'a, K, V>>;
+
 #[derive(Arken, Clone, Debug)]
 pub struct Node<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> {
     value_mask: Mask,
-    values: Cow<'a, [Ref<'a, KeyValue<'a, K, V>>]>,
+    values: Cow<'a, [KeyValueRef<'a, K, V>]>,
     node_mask: Mask,
-    nodes: Cow<'a, [Ref<'a, Node<'a, K, V>>]>,
+    nodes: Cow<'a, [NodeRef<'a, K, V>]>,
 }
 
+pub type NodeRef<'a, K, V> = Ref<'a, Node<'a, K, V>>;
+
 #[derive(Arken, Clone, Debug)]
-pub struct Root<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> {
-    node: Ref<'a, Node<'a, K, V>>,
+pub struct HashRoot<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> {
+    node: NodeRef<'a, K, V>,
     count: usize,
 }
+
+pub type HashRootRef<'a, K, V> = Ref<'a, HashRoot<'a, K, V>>;
 
 #[derive(Clone, Debug)]
 pub struct MemNode<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> {
     value_mask: Mask,
-    values: Cow<'a, [Ref<'a, KeyValue<'a, K, V>>]>,
+    values: Cow<'a, [KeyValueRef<'a, K, V>]>,
     node_mask: Mask,
-    nodes: Cow<'a, [Ref<'a, Node<'a, K, V>>]>,
+    nodes: Cow<'a, [NodeRef<'a, K, V>]>,
     mem_value_mask: Mask,
     mem_values: Vec<KeyValue<'a, K, V>>,
     mem_node_mask: Mask,
@@ -109,15 +115,15 @@ impl<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> From<Node<'a, K, V>> for Me
 }
 
 #[derive(Debug)]
-pub struct HashTrie<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> {
+pub struct HashMap<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> {
     pub reader: Reader<'a>,
     pub root: Option<MemNode<'a, K, V>>,
-    pub marker: &'a [u8],
+    pub root_reference: Option<HashRootRef<'a, K, V>>,
     pub count: usize,
 }
 
 impl<'a, K: 'a + Clone + Field<'a> + Hash + PartialEq, V: 'a + Clone + Field<'a>>
-    HashTrie<'a, K, V>
+    HashMap<'a, K, V>
 {
     fn hash(key: &K) -> u64 {
         let mut hasher = DefaultHasher::new();
@@ -125,21 +131,20 @@ impl<'a, K: 'a + Clone + Field<'a> + Hash + PartialEq, V: 'a + Clone + Field<'a>
         hasher.finish()
     }
 
-    pub fn open(reader: Reader<'a>, marker: &'a [u8]) -> Self {
+    pub fn open(reader: Reader<'a>, root_reference: Option<HashRootRef<'a, K, V>>) -> Self {
         Self {
             reader,
             root: None,
-            marker,
+            root_reference,
             count: 0,
         }
     }
 
     pub fn len(&self) -> usize {
-        if self.root.is_none() {
-            let Some(root) = self.reader.find::<Root<K, V>>(self.marker).next() else {
-                return 0;
-            };
-
+        if self.root.is_none()
+            && let Some(root_reference) = self.root_reference.as_ref()
+            && let Ok(root) = self.reader.read::<HashRoot<K, V>>(root_reference)
+        {
             return root.count;
         }
 
@@ -269,15 +274,11 @@ impl<'a, K: 'a + Clone + Field<'a> + Hash + PartialEq, V: 'a + Clone + Field<'a>
     pub fn remove(&mut self, key: &K) -> bool {
         let hash = Self::hash(key);
 
-        if self.root.is_none() {
-            let Some(root) = self.reader.find::<Root<K, V>>(self.marker).next() else {
-                return false;
-            };
-
-            let Ok(node) = self.reader.read::<Node<K, V>>(&root.node) else {
-                return false;
-            };
-
+        if self.root.is_none()
+            && let Some(root_reference) = self.root_reference.as_ref()
+            && let Ok(root) = self.reader.read::<HashRoot<K, V>>(root_reference)
+            && let Ok(node) = self.reader.read::<Node<K, V>>(&root.node)
+        {
             self.root = Some(MemNode::from(node));
             self.count = root.count;
         }
@@ -301,9 +302,10 @@ impl<'a, K: 'a + Clone + Field<'a> + Hash + PartialEq, V: 'a + Clone + Field<'a>
         };
 
         if self.root.is_none() {
-            if let Some(root) = self.reader.find::<Root<K, V>>(self.marker).next() {
-                let node = self.reader.read::<Node<K, V>>(&root.node).ok()?;
-
+            if let Some(root_reference) = self.root_reference.as_ref()
+                && let Ok(root) = self.reader.read::<HashRoot<K, V>>(root_reference)
+                && let Ok(node) = self.reader.read::<Node<K, V>>(&root.node)
+            {
                 self.root = Some(MemNode::from(node));
                 self.count = root.count;
             } else {
@@ -519,7 +521,8 @@ impl<'a, K: 'a + Clone + Field<'a> + Hash + PartialEq, V: 'a + Clone + Field<'a>
         let mut shift = 0;
 
         let Some(mut mem_node) = self.root.as_ref() else {
-            let root = self.reader.find::<Root<K, V>>(self.marker).next()?;
+            let root_reference = self.root_reference.as_ref()?;
+            let root = self.reader.read::<HashRoot<K, V>>(root_reference).ok()?;
             let node = self.reader.read::<Node<K, V>>(&root.node).ok()?;
 
             return self.get_from_reader(node, hash, shift, key);
@@ -662,38 +665,36 @@ impl<'a, K: 'a + Clone + Field<'a> + Hash + PartialEq, V: 'a + Clone + Field<'a>
             nodes: mem_node.nodes,
         };
 
-        writer.append_with_marker(bytes, self.marker, &node)
+        writer.append(bytes, &node)
     }
 
     pub fn commit<W: Seek + Write>(
         &mut self,
         bytes: &mut BytesMut,
         writer: &mut Writer<W>,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<HashRootRef<'a, K, V>>, Error> {
         let Some(node) = self.root.take() else {
-            return Ok(());
+            return Ok(None);
         };
 
         let node = self.commit_node(bytes, writer, node, 0)?;
 
-        let root = Root {
+        let root = HashRoot {
             node,
             count: self.count,
         };
 
-        writer
-            .append_with_marker(bytes, self.marker, &root)
-            .map(|_| ())
+        let reference = writer.append(bytes, &root)?;
+
+        Ok(Some(reference))
     }
 }
-
-pub type HashMap<'a, K, V> = HashTrie<'a, K, V>;
 
 pub struct HashSet<'a, K: Clone + Field<'a>>(HashMap<'a, K, ()>);
 
 impl<'a, K: Clone + Field<'a> + Hash + PartialEq> HashSet<'a, K> {
-    pub fn open(reader: Reader<'a>, marker: &'a [u8]) -> Self {
-        Self(HashMap::open(reader, marker))
+    pub fn open(reader: Reader<'a>, root_reference: Option<HashRootRef<'a, K, ()>>) -> Self {
+        Self(HashMap::open(reader, root_reference))
     }
 
     pub fn len(&self) -> usize {
@@ -720,7 +721,7 @@ impl<'a, K: Clone + Field<'a> + Hash + PartialEq> HashSet<'a, K> {
         &mut self,
         bytes: &mut BytesMut,
         writer: &mut Writer<W>,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<HashRootRef<'a, K, ()>>, Error> {
         self.0.commit(bytes, writer)
     }
 }
