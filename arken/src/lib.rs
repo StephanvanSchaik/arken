@@ -135,6 +135,16 @@ pub trait Field<'a> {
     }
 }
 
+impl<'a> Field<'a> for () {
+    fn from_slice(slice: &'a [u8], _: Config) -> Result<(Self, &'a [u8]), Error> {
+        Ok(((), slice))
+    }
+
+    fn put_bytes(&self, _: &mut BytesMut, _: Config) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
 impl<'a, T: Field<'a>> Field<'a> for Option<T> {
     fn from_slice(mut slice: &'a [u8], config: Config) -> Result<(Self, &'a [u8]), Error> {
         let (value, rest) = u8::from_slice(slice, config)?;
