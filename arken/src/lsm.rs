@@ -117,6 +117,13 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
     }
 
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
+        if self.count.is_none()
+            && let Some(root_reference) = self.root_reference.as_ref()
+            && let Ok(root) = self.reader.read::<MergeRoot<K, V>>(root_reference)
+        {
+            self.count = Some(root.count);
+        }
+
         let has_key = self.contains_key(&key);
         self.mem_table.insert(key, Some(value));
 
@@ -128,6 +135,13 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
     }
 
     pub fn remove(&mut self, key: &K) -> bool {
+        if self.count.is_none()
+            && let Some(root_reference) = self.root_reference.as_ref()
+            && let Ok(root) = self.reader.read::<MergeRoot<K, V>>(root_reference)
+        {
+            self.count = Some(root.count);
+        }
+
         if !self.contains_key(key) {
             return false;
         }
