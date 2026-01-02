@@ -4,8 +4,8 @@ use arken::{Arken, Error, Field, Reader, Ref, Writer};
 use bytes::BytesMut;
 use std::{
     borrow::Cow,
-    cmp::Ordering,
-    collections::BTreeMap,
+    cmp::{Ordering, Reverse},
+    collections::{BTreeMap, BinaryHeap},
     io::{Seek, Write},
     marker::PhantomData,
 };
@@ -36,6 +36,32 @@ pub struct MergeRoot<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> {
 }
 
 pub type MergeRootRef<'a, K, V> = Ref<'a, MergeRoot<'a, K, V>>;
+
+#[derive(Debug)]
+pub struct Keys<'a, 'b, K: Clone + Field<'a>, V: Clone + Field<'a>> {
+    map: &'b MergeMap<'a, K, V>,
+    heap: BinaryHeap<Reverse<(K, usize, usize)>>,
+}
+
+impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys<'a, 'b, K, V> {
+    type Item = K;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let Reverse((key, table, n)) = self.heap.pop()?;
+
+        if let Some(root_reference) = self.map.root_reference.as_ref()
+            && let Ok(root) = self.map.reader.read::<MergeRoot<K, V>>(root_reference)
+            && let Some(reference) = root.nodes.get(table)
+            && let Ok(node) = self.map.reader.read::<Node<'a, K, V>>(reference)
+            && let Some(reference) = node.values.get(n + 1)
+            && let Ok(key_value) = self.map.reader.read::<KeyValue<'a, K, V>>(reference)
+        {
+            self.heap.push(Reverse((key_value.key, table, n + 1)));
+        }
+
+        Some(key)
+    }
+}
 
 #[derive(Debug)]
 pub struct MergeMap<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> {
@@ -114,6 +140,32 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
         }
 
         None
+    }
+
+    pub fn keys<'b>(&'b self) -> Keys<'a, 'b, K, V> {
+        let mut heap = BinaryHeap::new();
+
+        if let Some(root_reference) = self.root_reference.as_ref()
+            && let Ok(root) = self.reader.read::<MergeRoot<K, V>>(root_reference)
+        {
+            for (index, reference) in root.nodes.iter().enumerate() {
+                let Ok(node) = self.reader.read::<Node<'a, K, V>>(reference) else {
+                    continue;
+                };
+
+                let Some(reference) = node.values.first() else {
+                    continue;
+                };
+
+                let Ok(key_value) = self.reader.read::<KeyValue<'a, K, V>>(reference) else {
+                    continue;
+                };
+
+                heap.push(Reverse((key_value.key, index, 0)));
+            }
+        }
+
+        Keys { map: self, heap }
     }
 
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
@@ -215,6 +267,10 @@ impl<'a, K: Clone + Field<'a> + Ord> MergeSet<'a, K> {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    pub fn keys<'b>(&'b self) -> Keys<'a, 'b, K, ()> {
+        self.0.keys()
     }
 
     pub fn remove(&mut self, key: &K) -> bool {

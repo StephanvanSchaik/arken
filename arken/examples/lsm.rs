@@ -6,6 +6,7 @@ use std::borrow::Cow;
 #[derive(Debug, Subcommand)]
 enum Command {
     Count,
+    List,
     Query { key: String },
     Add { key: String, value: String },
     Remove { key: String },
@@ -42,6 +43,18 @@ fn main() -> Result<(), Error> {
             let map: MergeMap<'_, Cow<'_, str>, Cow<'_, str>> = MergeMap::open(reader, root);
 
             println!("count = {}", map.len());
+        }
+        Command::List => {
+            let file = MappedFile::open("lsm.bin")?;
+            let reader = file.reader();
+            let root = reader
+                .find::<MergeRootRef<'_, Cow<'_, str>, Cow<'_, str>>>(b"map")
+                .next();
+            let map: MergeMap<'_, Cow<'_, str>, Cow<'_, str>> = MergeMap::open(reader, root);
+
+            for key in map.keys() {
+                println!("{key}");
+            }
         }
         Command::Query { key } => {
             let file = MappedFile::open("lsm.bin")?;
