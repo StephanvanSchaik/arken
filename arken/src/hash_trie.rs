@@ -115,6 +115,98 @@ impl<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> From<Node<'a, K, V>> for Me
 }
 
 #[derive(Debug)]
+pub enum AnyNode<'a, 'b, K: Clone + Field<'a>, V: Clone + Field<'a>> {
+    Disk(Node<'a, K, V>),
+    Memory(&'b MemNode<'a, K, V>),
+}
+
+#[derive(Debug)]
+pub struct Keys<'a, 'b, K: Clone + Field<'a>, V: Clone + Field<'a>> {
+    map: &'b HashMap<'a, K, V>,
+    stack: Vec<(AnyNode<'a, 'b, K, V>, usize)>,
+}
+
+impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys<'a, 'b, K, V> {
+    type Item = Cow<'b, K>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        'outer: while !self.stack.is_empty() {
+            let Some((node, index)) = self.stack.last_mut() else {
+                break;
+            };
+
+            match node {
+                AnyNode::Disk(node) => {
+                    for i in *index..64 {
+                        if let Some(dense_index) = node.value_mask.get_dense_index(i) {
+                            if let Some(reference) = node.values.get(dense_index)
+                                && let Ok(key_value) =
+                                    self.map.reader.read::<KeyValue<'a, K, V>>(reference)
+                            {
+                                *index = i + 1;
+                                return Some(Cow::Owned(key_value.key));
+                            }
+                        }
+
+                        if let Some(dense_index) = node.node_mask.get_dense_index(i) {
+                            if let Some(reference) = node.nodes.get(dense_index)
+                                && let Ok(node) = self.map.reader.read::<Node<'a, K, V>>(reference)
+                            {
+                                *index = i + 1;
+                                self.stack.push((AnyNode::Disk(node), 0));
+                                continue 'outer;
+                            }
+                        }
+                    }
+                }
+                AnyNode::Memory(node) => {
+                    for i in *index..64 {
+                        if let Some(dense_index) = node.mem_value_mask.get_dense_index(i) {
+                            if let Some(key_value) = node.mem_values.get(dense_index) {
+                                *index = i + 1;
+                                return Some(Cow::Borrowed(&key_value.key));
+                            }
+                        }
+
+                        if let Some(dense_index) = node.value_mask.get_dense_index(i) {
+                            if let Some(reference) = node.values.get(dense_index)
+                                && let Ok(key_value) =
+                                    self.map.reader.read::<KeyValue<'a, K, V>>(reference)
+                            {
+                                *index = i + 1;
+                                return Some(Cow::Owned(key_value.key));
+                            }
+                        }
+
+                        if let Some(dense_index) = node.mem_node_mask.get_dense_index(i) {
+                            if let Some(node) = node.mem_nodes.get(dense_index) {
+                                *index = i + 1;
+                                self.stack.push((AnyNode::Memory(node), 0));
+                                continue 'outer;
+                            }
+                        }
+
+                        if let Some(dense_index) = node.node_mask.get_dense_index(i) {
+                            if let Some(reference) = node.nodes.get(dense_index)
+                                && let Ok(node) = self.map.reader.read::<Node<'a, K, V>>(reference)
+                            {
+                                *index = i + 1;
+                                self.stack.push((AnyNode::Disk(node), 0));
+                                continue 'outer;
+                            }
+                        }
+                    }
+                }
+            }
+
+            self.stack.pop();
+        }
+
+        None
+    }
+}
+
+#[derive(Debug)]
 pub struct HashMap<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> {
     pub reader: Reader<'a>,
     pub root: Option<MemNode<'a, K, V>>,
@@ -153,6 +245,34 @@ impl<'a, K: 'a + Clone + Field<'a> + Hash + PartialEq, V: 'a + Clone + Field<'a>
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    pub fn keys<'b>(&'b self) -> Keys<'a, 'b, K, V> {
+        if let Some(node) = self.root.as_ref() {
+            let node = AnyNode::Memory(node);
+
+            return Keys {
+                map: self,
+                stack: vec![(node, 0)],
+            };
+        }
+
+        if let Some(root_reference) = self.root_reference.as_ref()
+            && let Ok(root) = self.reader.read::<HashRoot<K, V>>(root_reference)
+            && let Ok(node) = self.reader.read::<Node<'a, K, V>>(&root.node)
+        {
+            let node = AnyNode::Disk(node);
+
+            return Keys {
+                map: self,
+                stack: vec![(node, 0)],
+            };
+        }
+
+        return Keys {
+            map: self,
+            stack: vec![],
+        };
     }
 
     fn remove_node(
@@ -703,6 +823,10 @@ impl<'a, K: Clone + Field<'a> + Hash + PartialEq> HashSet<'a, K> {
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    pub fn keys<'b>(&'b self) -> Keys<'a, 'b, K, ()> {
+        self.0.keys()
     }
 
     pub fn remove(&mut self, key: &K) -> bool {

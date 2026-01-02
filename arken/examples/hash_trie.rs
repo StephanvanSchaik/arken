@@ -6,6 +6,7 @@ use std::borrow::Cow;
 #[derive(Debug, Subcommand)]
 enum Command {
     Count,
+    List,
     Query { key: String },
     Add { key: String, value: String },
     Remove { key: String },
@@ -42,6 +43,18 @@ fn main() -> Result<(), Error> {
             let trie: HashMap<'_, Cow<'_, str>, Cow<'_, str>> = HashMap::open(reader, root);
 
             println!("count = {}", trie.len());
+        }
+        Command::List => {
+            let file = MappedFile::open("trie.bin")?;
+            let reader = file.reader();
+            let root = reader
+                .find::<HashRootRef<'_, Cow<'_, str>, Cow<'_, str>>>(b"map")
+                .next();
+            let trie: HashMap<'_, Cow<'_, str>, Cow<'_, str>> = HashMap::open(reader, root);
+
+            for key in trie.keys() {
+                println!("{key}");
+            }
         }
         Command::Query { key } => {
             let file = MappedFile::open("trie.bin")?;
