@@ -66,6 +66,30 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
             self.heap.push(Reverse((key_value.key, table, n + 1)));
         }
 
+        while let Some(Reverse((new_key, _, _))) = self.heap.peek() {
+            if *new_key != key {
+                break;
+            }
+
+            let Reverse((_, table, n)) = self.heap.pop()?;
+
+            if table == usize::MAX {
+                if let Some((key, _)) = self.iter.next() {
+                    self.heap.push(Reverse((key.clone(), table, n + 1)));
+                }
+            }
+
+            if let Some(root_reference) = self.map.root_reference.as_ref()
+                && let Ok(root) = self.map.reader.read::<MergeRoot<K, V>>(root_reference)
+                && let Some(reference) = root.nodes.get(table)
+                && let Ok(node) = self.map.reader.read::<Node<'a, K, V>>(reference)
+                && let Some(reference) = node.values.get(n + 1)
+                && let Ok(key_value) = self.map.reader.read::<KeyValue<'a, K, V>>(reference)
+            {
+                self.heap.push(Reverse((key_value.key, table, n + 1)));
+            }
+        }
+
         Some(key)
     }
 }
