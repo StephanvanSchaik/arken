@@ -41,6 +41,7 @@ pub type MergeRootRef<'a, K, V> = Ref<'a, MergeRoot<'a, K, V>>;
 pub struct Keys<'a, 'b, K: Clone + Field<'a>, V: Clone + Field<'a>> {
     map: &'b MergeMap<'a, K, V>,
     heap: BinaryHeap<Reverse<(K, usize, usize)>>,
+    iter: std::collections::btree_map::Iter<'b, K, Option<V>>,
 }
 
 impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys<'a, 'b, K, V> {
@@ -48,6 +49,12 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
 
     fn next(&mut self) -> Option<Self::Item> {
         let Reverse((key, table, n)) = self.heap.pop()?;
+
+        if table == usize::MAX {
+            if let Some((key, _)) = self.iter.next() {
+                self.heap.push(Reverse((key.clone(), table, n + 1)));
+            }
+        }
 
         if let Some(root_reference) = self.map.root_reference.as_ref()
             && let Ok(root) = self.map.reader.read::<MergeRoot<K, V>>(root_reference)
@@ -145,6 +152,12 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
     pub fn keys<'b>(&'b self) -> Keys<'a, 'b, K, V> {
         let mut heap = BinaryHeap::new();
 
+        let mut iter = self.mem_table.iter();
+
+        if let Some((key, _)) = iter.next() {
+            heap.push(Reverse((key.clone(), usize::MAX, 0)));
+        }
+
         if let Some(root_reference) = self.root_reference.as_ref()
             && let Ok(root) = self.reader.read::<MergeRoot<K, V>>(root_reference)
         {
@@ -165,7 +178,11 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
             }
         }
 
-        Keys { map: self, heap }
+        Keys {
+            map: self,
+            heap,
+            iter,
+        }
     }
 
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
