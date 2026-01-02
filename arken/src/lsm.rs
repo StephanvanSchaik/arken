@@ -38,28 +38,28 @@ pub struct MergeRoot<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> {
 pub type MergeRootRef<'a, K, V> = Ref<'a, MergeRoot<'a, K, V>>;
 
 #[derive(Debug)]
-struct Element<K: Ord, V> {
-    key: K,
-    value: Option<V>,
+struct Element<'a, K: Clone + Ord, V: Clone> {
+    key: Cow<'a, K>,
+    value: Option<Cow<'a, V>>,
     table: usize,
     next: usize,
 }
 
-impl<K: Ord, V> PartialEq for Element<K, V> {
+impl<K: Clone + Ord, V: Clone> PartialEq for Element<'_, K, V> {
     fn eq(&self, other: &Self) -> bool {
         self.key.eq(&other.key)
     }
 }
 
-impl<K: Ord, V> Eq for Element<K, V> {}
+impl<K: Clone + Ord, V: Clone> Eq for Element<'_, K, V> {}
 
-impl<K: Ord, V> PartialOrd for Element<K, V> {
+impl<K: Clone + Ord, V: Clone> PartialOrd for Element<'_, K, V> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<K: Ord, V> Ord for Element<K, V> {
+impl<K: Clone + Ord, V: Clone> Ord for Element<'_, K, V> {
     fn cmp(&self, other: &Self) -> Ordering {
         other.key.cmp(&self.key)
     }
@@ -68,12 +68,12 @@ impl<K: Ord, V> Ord for Element<K, V> {
 #[derive(Debug)]
 pub struct Keys<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> {
     map: &'b MergeMap<'a, K, V>,
-    heap: BinaryHeap<Element<K, V>>,
+    heap: BinaryHeap<Element<'b, K, V>>,
     iter: std::collections::btree_map::Iter<'b, K, Option<V>>,
 }
 
 impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys<'a, 'b, K, V> {
-    type Item = K;
+    type Item = Cow<'b, K>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut key = None;
@@ -87,8 +87,8 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
             if element.table == usize::MAX {
                 if let Some((key, value)) = self.iter.next() {
                     self.heap.push(Element {
-                        key: key.clone(),
-                        value: value.clone(),
+                        key: Cow::Borrowed(key),
+                        value: value.as_ref().map(Cow::Borrowed),
                         table: element.table,
                         next: element.next + 1,
                     });
@@ -103,8 +103,8 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
                 && let Ok(key_value) = self.map.reader.read::<KeyValue<'a, K, V>>(reference)
             {
                 self.heap.push(Element {
-                    key: key_value.key,
-                    value: key_value.value,
+                    key: Cow::Owned(key_value.key),
+                    value: key_value.value.map(Cow::Owned),
                     table: element.table,
                     next: element.next + 1,
                 });
@@ -124,8 +124,8 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
                 if element.table == usize::MAX {
                     if let Some((key, value)) = self.iter.next() {
                         self.heap.push(Element {
-                            key: key.clone(),
-                            value: value.clone(),
+                            key: Cow::Borrowed(key),
+                            value: value.as_ref().map(Cow::Borrowed),
                             table: element.table,
                             next: element.next + 1,
                         });
@@ -140,8 +140,8 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
                     && let Ok(key_value) = self.map.reader.read::<KeyValue<'a, K, V>>(reference)
                 {
                     self.heap.push(Element {
-                        key: key_value.key,
-                        value: key_value.value,
+                        key: Cow::Owned(key_value.key),
+                        value: key_value.value.map(Cow::Owned),
                         table: element.table,
                         next: element.next + 1,
                     });
@@ -239,8 +239,8 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
 
         if let Some((key, value)) = iter.next() {
             heap.push(Element {
-                key: key.clone(),
-                value: value.clone(),
+                key: Cow::Borrowed(key),
+                value: value.as_ref().map(Cow::Borrowed),
                 table: usize::MAX,
                 next: 0,
             });
@@ -263,8 +263,8 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
                 };
 
                 heap.push(Element {
-                    key: key_value.key,
-                    value: key_value.value,
+                    key: Cow::Owned(key_value.key),
+                    value: key_value.value.map(Cow::Owned),
                     table: index,
                     next: 0,
                 });
