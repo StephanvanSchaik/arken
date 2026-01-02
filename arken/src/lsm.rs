@@ -4,7 +4,7 @@ use arken::{Arken, Error, Field, Reader, Ref, Writer};
 use bytes::BytesMut;
 use std::{
     borrow::Cow,
-    cmp::{Ordering, Reverse},
+    cmp::Ordering,
     collections::{BTreeMap, BinaryHeap},
     io::{Seek, Write},
     marker::PhantomData,
@@ -38,9 +38,37 @@ pub struct MergeRoot<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> {
 pub type MergeRootRef<'a, K, V> = Ref<'a, MergeRoot<'a, K, V>>;
 
 #[derive(Debug)]
-pub struct Keys<'a, 'b, K: Clone + Field<'a>, V: Clone + Field<'a>> {
+struct Element<K: Ord, V> {
+    key: K,
+    value: Option<V>,
+    table: usize,
+    next: usize,
+}
+
+impl<K: Ord, V> PartialEq for Element<K, V> {
+    fn eq(&self, other: &Self) -> bool {
+        self.key.eq(&other.key)
+    }
+}
+
+impl<K: Ord, V> Eq for Element<K, V> {}
+
+impl<K: Ord, V> PartialOrd for Element<K, V> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<K: Ord, V> Ord for Element<K, V> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.key.cmp(&self.key)
+    }
+}
+
+#[derive(Debug)]
+pub struct Keys<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> {
     map: &'b MergeMap<'a, K, V>,
-    heap: BinaryHeap<Reverse<(K, usize, usize)>>,
+    heap: BinaryHeap<Element<K, V>>,
     iter: std::collections::btree_map::Iter<'b, K, Option<V>>,
 }
 
@@ -48,49 +76,80 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
     type Item = K;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let Reverse((key, table, n)) = self.heap.pop()?;
+        let mut key = None;
+        let mut value = None;
 
-        if table == usize::MAX {
-            if let Some((key, _)) = self.iter.next() {
-                self.heap.push(Reverse((key.clone(), table, n + 1)));
-            }
-        }
+        while value.is_none() {
+            let element = self.heap.pop()?;
+            key = Some(element.key);
+            value = element.value;
 
-        if let Some(root_reference) = self.map.root_reference.as_ref()
-            && let Ok(root) = self.map.reader.read::<MergeRoot<K, V>>(root_reference)
-            && let Some(reference) = root.nodes.get(table)
-            && let Ok(node) = self.map.reader.read::<Node<'a, K, V>>(reference)
-            && let Some(reference) = node.values.get(n + 1)
-            && let Ok(key_value) = self.map.reader.read::<KeyValue<'a, K, V>>(reference)
-        {
-            self.heap.push(Reverse((key_value.key, table, n + 1)));
-        }
-
-        while let Some(Reverse((new_key, _, _))) = self.heap.peek() {
-            if *new_key != key {
-                break;
-            }
-
-            let Reverse((_, table, n)) = self.heap.pop()?;
-
-            if table == usize::MAX {
-                if let Some((key, _)) = self.iter.next() {
-                    self.heap.push(Reverse((key.clone(), table, n + 1)));
+            if element.table == usize::MAX {
+                if let Some((key, value)) = self.iter.next() {
+                    self.heap.push(Element {
+                        key: key.clone(),
+                        value: value.clone(),
+                        table: element.table,
+                        next: element.next + 1,
+                    });
                 }
             }
 
             if let Some(root_reference) = self.map.root_reference.as_ref()
                 && let Ok(root) = self.map.reader.read::<MergeRoot<K, V>>(root_reference)
-                && let Some(reference) = root.nodes.get(table)
+                && let Some(reference) = root.nodes.get(element.table)
                 && let Ok(node) = self.map.reader.read::<Node<'a, K, V>>(reference)
-                && let Some(reference) = node.values.get(n + 1)
+                && let Some(reference) = node.values.get(element.next + 1)
                 && let Ok(key_value) = self.map.reader.read::<KeyValue<'a, K, V>>(reference)
             {
-                self.heap.push(Reverse((key_value.key, table, n + 1)));
+                self.heap.push(Element {
+                    key: key_value.key,
+                    value: key_value.value,
+                    table: element.table,
+                    next: element.next + 1,
+                });
+            }
+
+            while let Some(element) = self.heap.peek() {
+                if key.as_ref().map(|key| *key != element.key).unwrap_or(false) {
+                    break;
+                }
+
+                let Some(element) = self.heap.pop() else {
+                    break;
+                };
+
+                value = element.value;
+
+                if element.table == usize::MAX {
+                    if let Some((key, value)) = self.iter.next() {
+                        self.heap.push(Element {
+                            key: key.clone(),
+                            value: value.clone(),
+                            table: element.table,
+                            next: element.next + 1,
+                        });
+                    }
+                }
+
+                if let Some(root_reference) = self.map.root_reference.as_ref()
+                    && let Ok(root) = self.map.reader.read::<MergeRoot<K, V>>(root_reference)
+                    && let Some(reference) = root.nodes.get(element.table)
+                    && let Ok(node) = self.map.reader.read::<Node<'a, K, V>>(reference)
+                    && let Some(reference) = node.values.get(element.next + 1)
+                    && let Ok(key_value) = self.map.reader.read::<KeyValue<'a, K, V>>(reference)
+                {
+                    self.heap.push(Element {
+                        key: key_value.key,
+                        value: key_value.value,
+                        table: element.table,
+                        next: element.next + 1,
+                    });
+                }
             }
         }
 
-        Some(key)
+        key
     }
 }
 
@@ -178,8 +237,13 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
 
         let mut iter = self.mem_table.iter();
 
-        if let Some((key, _)) = iter.next() {
-            heap.push(Reverse((key.clone(), usize::MAX, 0)));
+        if let Some((key, value)) = iter.next() {
+            heap.push(Element {
+                key: key.clone(),
+                value: value.clone(),
+                table: usize::MAX,
+                next: 0,
+            });
         }
 
         if let Some(root_reference) = self.root_reference.as_ref()
@@ -198,7 +262,12 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
                     continue;
                 };
 
-                heap.push(Reverse((key_value.key, index, 0)));
+                heap.push(Element {
+                    key: key_value.key,
+                    value: key_value.value,
+                    table: index,
+                    next: 0,
+                });
             }
         }
 
