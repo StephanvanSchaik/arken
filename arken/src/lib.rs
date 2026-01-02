@@ -4,6 +4,7 @@ mod float;
 mod hash_trie;
 #[cfg(feature = "jiff")]
 mod jiff;
+mod lsm;
 mod migrate;
 mod reader;
 mod signed;
@@ -24,6 +25,7 @@ use thiserror::Error;
 #[cfg(feature = "rust_decimal")]
 pub use crate::decimal::FixedDecimal;
 pub use crate::hash_trie::{HashMap, HashRootRef, HashSet};
+pub use crate::lsm::{MergeMap, MergeRootRef, MergeSet};
 pub use crate::migrate::{MigrationStrategy, migrate, migrate_to};
 pub use crate::reader::{MappedFile, Reader};
 pub use crate::writer::Writer;

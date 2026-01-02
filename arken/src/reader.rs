@@ -142,7 +142,7 @@ impl MappedFile {
             self.size = 0;
         }
 
-        let map = unsafe { MmapOptions::new(map_size)?.with_file(&file, 0).map()? };
+        let map = unsafe { MmapOptions::new(map_size)?.with_file(file, 0).map()? };
 
         self.map = Some(map);
         self.size = size;
