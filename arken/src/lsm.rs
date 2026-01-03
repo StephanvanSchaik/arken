@@ -184,6 +184,25 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Valu
     }
 }
 
+/// An ordered map based on Log-Structured Merge (LSM). Key-value pairs are first collected in a
+/// sorted table in memory until committed to the append-only log file. Committing writes the
+/// memory table in order by appending it to the append-only log file and updating the root to
+/// reference the newly written table. This means that insertion and removal are effectively O(1),
+/// and as such LSM is capable of achieving high write throughput.
+///
+/// Retrieval involves checking the memory table first as well as the committed sorted tables in
+/// reverse order until the most recent key-value pair is found for a given key. As such, it is
+/// important to keep the number of committed sorted tables to a minimum.
+///
+/// Iterating the key-value pairs in order involves the use of a binary heap over the
+/// minimum/maximum values in the memory table as well as the committed sorted tables to
+/// essentially perform a merge sort. This is also used in compaction to reduce the number of
+/// committed sorted tables by merging multiple tables into a single table.
+///
+/// Given a key type with a total order, an ordered map stores its entries in key order. That means
+/// that keys must be of a type that implements the [std::cmp::Ord] trait, such that two keys can
+/// always be compared to determing their [std::cmp::Ordering]. Examples of keys with a total order
+/// are strings with lexicographical order, and numbers with their natural order.
 #[derive(Debug)]
 pub struct MergeMap<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> {
     reader: Reader<'a>,
