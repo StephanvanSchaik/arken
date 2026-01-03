@@ -885,7 +885,7 @@ impl<'a, K: Clone + Field<'a> + Hash + PartialEq> HashSet<'a, K> {
         self.0.is_empty()
     }
 
-    pub fn keys<'b>(&'b self) -> Keys<'a, 'b, K, ()> {
+    pub fn iter<'b>(&'b self) -> Keys<'a, 'b, K, ()> {
         self.0.keys()
     }
 
