@@ -331,7 +331,7 @@ impl<'a, K: 'a + Clone + Field<'a> + Hash + PartialEq, V: 'a + Clone + Field<'a>
         Keys { iter: self.iter() }
     }
 
-    pub fn value<'b>(&'b self) -> Values<'a, 'b, K, V> {
+    pub fn values<'b>(&'b self) -> Values<'a, 'b, K, V> {
         Values { iter: self.iter() }
     }
 
