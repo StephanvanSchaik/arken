@@ -260,10 +260,10 @@ impl<'a, 'b, K: Clone + Field<'a> + PartialEq, V: Clone + Field<'a>> Iterator
 
 #[derive(Debug)]
 pub struct HashMap<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> {
-    pub reader: Reader<'a>,
-    pub root: Option<MemNode<'a, K, V>>,
-    pub root_reference: Option<HashRootRef<'a, K, V>>,
-    pub count: usize,
+    reader: Reader<'a>,
+    root: Option<MemNode<'a, K, V>>,
+    root_reference: Option<HashRootRef<'a, K, V>>,
+    count: usize,
 }
 
 impl<'a, K: 'a + Clone + Field<'a> + Hash + PartialEq, V: 'a + Clone + Field<'a>>
