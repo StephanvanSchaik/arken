@@ -155,40 +155,92 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
 
 #[derive(Debug)]
 pub struct MergeMap<'a, K: Clone + Field<'a>, V: Clone + Field<'a>> {
-    pub reader: Reader<'a>,
-    pub mem_table: BTreeMap<K, Option<V>>,
-    pub root_reference: Option<MergeRootRef<'a, K, V>>,
-    pub count: Option<usize>,
+    reader: Reader<'a>,
+    mem_table: BTreeMap<K, Option<V>>,
+    root_reference: Option<MergeRootRef<'a, K, V>>,
+    root: Option<MergeRoot<'a, K, V>>,
 }
 
 impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a, K, V> {
+    fn read_root(&self) -> Option<MergeRoot<'a, K, V>> {
+        let root_reference = self.root_reference.as_ref()?;
+        let root = self.reader.read(root_reference).ok()?;
+
+        Some(root)
+    }
+
+    fn prepare_root(&mut self) {
+        // There is nothing to do if the root has already been cached.
+        if self.root.is_some() {
+            return;
+        }
+
+        // Try reading the root from disk. If there is no root, prepare an empty root.
+        let Some(mut root) = self.read_root() else {
+            self.root = Some(MergeRoot {
+                nodes: Cow::Borrowed(&[]),
+                count: 0,
+            });
+
+            return;
+        };
+
+        // Check if there are previously written nodes that do not have a sufficient number of
+        // elements. Read their key-value pairs into the memory table, such that we can coalesce
+        // these nodes with the newly written node to keep the number of small tables reasonable.
+        while self.mem_table.len() < 4096 {
+            let Some(reference) = root.nodes.last() else {
+                break;
+            };
+
+            let Ok(node) = self.reader.read::<Node<'a, K, V>>(reference) else {
+                break;
+            };
+
+            if node.values.len() >= 4096 {
+                break;
+            }
+
+            for reference in node.values.as_ref() {
+                let Ok(key_value) = self.reader.read::<KeyValue<'a, K, V>>(reference) else {
+                    continue;
+                };
+
+                self.mem_table.insert(key_value.key, key_value.value);
+            }
+
+            let mut nodes = root.nodes.into_owned();
+            nodes.pop();
+            root.nodes = Cow::Owned(nodes);
+        }
+
+        self.root = Some(root);
+    }
+
     pub fn open(reader: Reader<'a>, root_reference: Option<MergeRootRef<'a, K, V>>) -> Self {
         Self {
             reader,
             mem_table: BTreeMap::new(),
             root_reference,
-            count: None,
+            root: None,
         }
     }
 
+    /// Returns the number of elements in the map.
     pub fn len(&self) -> usize {
-        if let Some(count) = self.count {
-            return count;
-        }
-
-        if let Some(root_reference) = self.root_reference.as_ref()
-            && let Ok(root) = self.reader.read::<MergeRoot<K, V>>(root_reference)
-        {
-            return root.count;
-        }
-
-        0
+        self.root
+            .as_ref()
+            .map(|root| root.count)
+            .or(self.read_root().map(|root| root.count))
+            .unwrap_or(0)
     }
 
+    /// Returns `true` if the map contains no elements.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Returns `true` if the map contains a value for the specified key.
     pub fn contains_key(&self, key: &K) -> bool {
         self.get(key).is_some()
     }
@@ -198,8 +250,7 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
             return value.as_ref().map(|value| Cow::Borrowed(value));
         }
 
-        let root_reference = self.root_reference.as_ref()?;
-        let root = self.reader.read::<MergeRoot<K, V>>(root_reference).ok()?;
+        let root = self.read_root()?;
 
         for reference in root.nodes.iter().rev() {
             let Ok(node) = self.reader.read::<Node<'a, K, V>>(reference) else {
@@ -278,38 +329,36 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
         }
     }
 
+    /// Inserts a key-value pair into the map.
+    ///
+    /// If the map did not have this key present, `None` is returned.
+    ///
+    /// If the map did have this key present, the value is updated, and the old value is returned.
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
-        if self.count.is_none()
-            && let Some(root_reference) = self.root_reference.as_ref()
-            && let Ok(root) = self.reader.read::<MergeRoot<K, V>>(root_reference)
-        {
-            self.count = Some(root.count);
-        }
+        self.prepare_root();
 
         let has_key = self.contains_key(&key);
         self.mem_table.insert(key, Some(value));
 
-        if !has_key {
-            self.count = Some(self.count.unwrap_or(0) + 1);
+        if !has_key && let Some(root) = &mut self.root {
+            root.count += 1;
         }
 
         None
     }
 
     pub fn remove(&mut self, key: &K) -> bool {
-        if self.count.is_none()
-            && let Some(root_reference) = self.root_reference.as_ref()
-            && let Ok(root) = self.reader.read::<MergeRoot<K, V>>(root_reference)
-        {
-            self.count = Some(root.count);
-        }
+        self.prepare_root();
 
         if !self.contains_key(key) {
             return false;
         }
 
         self.mem_table.insert(key.clone(), None);
-        self.count = self.count.map(|count| count - 1);
+
+        if let Some(root) = &mut self.root {
+            root.count -= 1;
+        }
 
         true
     }
@@ -322,6 +371,10 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
         if self.mem_table.is_empty() {
             return Ok(self.root_reference.clone());
         }
+
+        let Some(root) = self.root.take() else {
+            return Ok(self.root_reference.clone());
+        };
 
         let mut values = Vec::with_capacity(self.mem_table.len());
 
@@ -352,11 +405,6 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
         };
 
         nodes.push(reference);
-
-        let root = MergeRoot {
-            nodes: nodes.into(),
-            count: self.count.unwrap_or(0),
-        };
 
         let reference = writer.append(bytes, &root)?;
 
