@@ -66,14 +66,14 @@ impl<K: Clone + Ord, V: Clone> Ord for Element<'_, K, V> {
 }
 
 #[derive(Debug)]
-pub struct Keys<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> {
+pub struct Iter<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> {
     map: &'b MergeMap<'a, K, V>,
     heap: BinaryHeap<Element<'b, K, V>>,
     iter: std::collections::btree_map::Iter<'b, K, Option<V>>,
 }
 
-impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys<'a, 'b, K, V> {
-    type Item = Cow<'b, K>;
+impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Iter<'a, 'b, K, V> {
+    type Item = (Cow<'b, K>, Cow<'b, V>);
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut key = None;
@@ -149,7 +149,38 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
             }
         }
 
-        key
+        let key = key?;
+        let value = value?;
+
+        Some((key, value))
+    }
+}
+
+#[derive(Debug)]
+pub struct Keys<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> {
+    iter: Iter<'a, 'b, K, V>,
+}
+
+impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys<'a, 'b, K, V> {
+    type Item = Cow<'b, K>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(k, _)| k)
+    }
+}
+
+#[derive(Debug)]
+pub struct Values<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> {
+    iter: Iter<'a, 'b, K, V>,
+}
+
+impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Values<'a, 'b, K, V> {
+    type Item = Cow<'b, K>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(k, _)| k)
     }
 }
 
@@ -283,7 +314,8 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
         None
     }
 
-    pub fn keys<'b>(&'b self) -> Keys<'a, 'b, K, V> {
+    /// Gets an iterator over the entries of the map, sorted by key.
+    pub fn iter<'b>(&'b self) -> Iter<'a, 'b, K, V> {
         let mut heap = BinaryHeap::new();
 
         let mut iter = self.mem_table.iter();
@@ -322,11 +354,23 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
             }
         }
 
-        Keys {
+        Iter {
             map: self,
             heap,
             iter,
         }
+    }
+
+    /// Gets an iterator over the keys of the map, in sorted order.
+    #[inline]
+    pub fn keys<'b>(&'b self) -> Keys<'a, 'b, K, V> {
+        Keys { iter: self.iter() }
+    }
+
+    /// Gets an iterator over the values of the map, in order by key.
+    #[inline]
+    pub fn values<'b>(&'b self) -> Values<'a, 'b, K, V> {
+        Values { iter: self.iter() }
     }
 
     /// Inserts a key-value pair into the map.
