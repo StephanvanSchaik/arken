@@ -121,13 +121,15 @@ pub enum AnyNode<'a, 'b, K: Clone + Field<'a>, V: Clone + Field<'a>> {
 }
 
 #[derive(Debug)]
-pub struct Keys<'a, 'b, K: Clone + Field<'a>, V: Clone + Field<'a>> {
+pub struct Iter<'a, 'b, K: Clone + Field<'a>, V: Clone + Field<'a>> {
     map: &'b HashMap<'a, K, V>,
     stack: Vec<(AnyNode<'a, 'b, K, V>, usize)>,
 }
 
-impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys<'a, 'b, K, V> {
-    type Item = Cow<'b, K>;
+impl<'a, 'b, K: Clone + Field<'a> + PartialEq, V: Clone + Field<'a>> Iterator
+    for Iter<'a, 'b, K, V>
+{
+    type Item = (Cow<'b, K>, Cow<'b, V>);
 
     fn next(&mut self) -> Option<Self::Item> {
         'outer: while !self.stack.is_empty() {
@@ -144,7 +146,11 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
                                     self.map.reader.read::<KeyValue<'a, K, V>>(reference)
                             {
                                 *index = i + 1;
-                                return Some(Cow::Owned(key_value.key));
+
+                                let key = Cow::Owned(key_value.key);
+                                let value = Cow::Owned(key_value.value);
+
+                                return Some((key, value));
                             }
                         }
 
@@ -153,7 +159,9 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
                                 && let Ok(node) = self.map.reader.read::<Node<'a, K, V>>(reference)
                             {
                                 *index = i + 1;
+
                                 self.stack.push((AnyNode::Disk(node), 0));
+
                                 continue 'outer;
                             }
                         }
@@ -164,7 +172,11 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
                         if let Some(dense_index) = node.mem_value_mask.get_dense_index(i) {
                             if let Some(key_value) = node.mem_values.get(dense_index) {
                                 *index = i + 1;
-                                return Some(Cow::Borrowed(&key_value.key));
+
+                                let key = Cow::Borrowed(&key_value.key);
+                                let value = Cow::Borrowed(&key_value.value);
+
+                                return Some((key, value));
                             }
                         }
 
@@ -174,14 +186,20 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
                                     self.map.reader.read::<KeyValue<'a, K, V>>(reference)
                             {
                                 *index = i + 1;
-                                return Some(Cow::Owned(key_value.key));
+
+                                let key = Cow::Owned(key_value.key);
+                                let value = Cow::Owned(key_value.value);
+
+                                return Some((key, value));
                             }
                         }
 
                         if let Some(dense_index) = node.mem_node_mask.get_dense_index(i) {
                             if let Some(node) = node.mem_nodes.get(dense_index) {
                                 *index = i + 1;
+
                                 self.stack.push((AnyNode::Memory(node), 0));
+
                                 continue 'outer;
                             }
                         }
@@ -191,7 +209,9 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
                                 && let Ok(node) = self.map.reader.read::<Node<'a, K, V>>(reference)
                             {
                                 *index = i + 1;
+
                                 self.stack.push((AnyNode::Disk(node), 0));
+
                                 continue 'outer;
                             }
                         }
@@ -203,6 +223,38 @@ impl<'a, 'b, K: Clone + Field<'a> + Ord, V: Clone + Field<'a>> Iterator for Keys
         }
 
         None
+    }
+}
+
+#[derive(Debug)]
+pub struct Keys<'a, 'b, K: Clone + Field<'a> + PartialEq, V: Clone + Field<'a>> {
+    iter: Iter<'a, 'b, K, V>,
+}
+
+impl<'a, 'b, K: Clone + Field<'a> + PartialEq, V: Clone + Field<'a>> Iterator
+    for Keys<'a, 'b, K, V>
+{
+    type Item = Cow<'b, K>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(k, _)| k)
+    }
+}
+
+#[derive(Debug)]
+pub struct Values<'a, 'b, K: Clone + Field<'a> + PartialEq, V: Clone + Field<'a>> {
+    iter: Iter<'a, 'b, K, V>,
+}
+
+impl<'a, 'b, K: Clone + Field<'a> + PartialEq, V: Clone + Field<'a>> Iterator
+    for Values<'a, 'b, K, V>
+{
+    type Item = Cow<'b, K>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(k, _)| k)
     }
 }
 
@@ -247,11 +299,11 @@ impl<'a, K: 'a + Clone + Field<'a> + Hash + PartialEq, V: 'a + Clone + Field<'a>
         self.len() == 0
     }
 
-    pub fn keys<'b>(&'b self) -> Keys<'a, 'b, K, V> {
+    pub fn iter<'b>(&'b self) -> Iter<'a, 'b, K, V> {
         if let Some(node) = self.root.as_ref() {
             let node = AnyNode::Memory(node);
 
-            return Keys {
+            return Iter {
                 map: self,
                 stack: vec![(node, 0)],
             };
@@ -263,16 +315,24 @@ impl<'a, K: 'a + Clone + Field<'a> + Hash + PartialEq, V: 'a + Clone + Field<'a>
         {
             let node = AnyNode::Disk(node);
 
-            return Keys {
+            return Iter {
                 map: self,
                 stack: vec![(node, 0)],
             };
         }
 
-        return Keys {
+        return Iter {
             map: self,
             stack: vec![],
         };
+    }
+
+    pub fn keys<'b>(&'b self) -> Keys<'a, 'b, K, V> {
+        Keys { iter: self.iter() }
+    }
+
+    pub fn value<'b>(&'b self) -> Values<'a, 'b, K, V> {
+        Values { iter: self.iter() }
     }
 
     fn remove_node(
