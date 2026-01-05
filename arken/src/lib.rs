@@ -291,7 +291,7 @@ impl<'a, T: Clone + Field<'a>> Iterator for Iter<'a, T> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Ref<'a, T: Field<'a>> {
     pub(crate) offset: usize,
     pub(crate) _marker: &'a PhantomData<T>,
