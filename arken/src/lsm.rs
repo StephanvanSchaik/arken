@@ -435,7 +435,7 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
             return Ok(self.root_reference.clone());
         }
 
-        let Some(root) = self.root.take() else {
+        let Some(mut root) = self.root.clone() else {
             return Ok(self.root_reference.clone());
         };
 
@@ -459,15 +459,9 @@ impl<'a, K: 'a + Clone + Field<'a> + Ord, V: 'a + Clone + Field<'a>> MergeMap<'a
 
         let reference = writer.append(bytes, &node)?;
 
-        let mut nodes = if let Some(root_reference) = self.root_reference.as_ref()
-            && let Ok(root) = self.reader.read::<MergeRoot<K, V>>(root_reference)
-        {
-            root.nodes.into_owned()
-        } else {
-            vec![]
-        };
-
+        let mut nodes = std::mem::take(&mut root.nodes).into_owned();
         nodes.push(reference);
+        root.nodes = Cow::Owned(nodes);
 
         let reference = writer.append(bytes, &root)?;
 
