@@ -8,6 +8,7 @@ mod lsm;
 mod migrate;
 mod reader;
 mod signed;
+mod trigram;
 mod unsigned;
 #[cfg(feature = "uuid")]
 mod uuid;
@@ -28,6 +29,9 @@ pub use crate::hash_trie::{HashMap, HashRootRef, HashSet};
 pub use crate::lsm::{MergeMap, MergeRootRef, MergeSet};
 pub use crate::migrate::{MigrationStrategy, migrate, migrate_to};
 pub use crate::reader::{MappedFile, Reader};
+pub use crate::trigram::{
+    ByteTrigramIter, StringTrigramIter, TrigramIter, TrigramMap, TrigramRootRef, TrigramSet,
+};
 pub use crate::writer::Writer;
 pub use arken_impl::Arken;
 

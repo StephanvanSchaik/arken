@@ -12,6 +12,7 @@ jiff = { workspace = true, optional = true }
 mmap-rs.workspace = true
 memchr.workspace = true
 num_enum.workspace = true
+ordered-float = "5"
 pastey.workspace = true
 rust_decimal = { workspace = true, optional = true }
 tempfile.workspace = true
